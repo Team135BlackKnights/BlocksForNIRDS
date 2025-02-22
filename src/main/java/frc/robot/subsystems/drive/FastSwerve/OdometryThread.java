@@ -3,6 +3,7 @@ package frc.robot.subsystems.drive.FastSwerve;
 import com.ctre.phoenix6.BaseStatusSignal;
 import com.ctre.phoenix6.StatusSignal;
 import frc.robot.Constants;
+import frc.robot.utils.CompetitionFieldUtils.Simulation.drive.AbstractDriveTrainSimulation;
 import frc.robot.utils.drive.DriveConstants;
 
 import org.littletonrobotics.junction.AutoLog;
@@ -23,32 +24,36 @@ public interface OdometryThread {
 			this.queue = new ArrayBlockingQueue<>(20);
 		}
 
-		public void cacheInputToQueue() { this.queue.offer(supplier.get()); }
+		public void cacheInputToQueue() {
+			this.queue.offer(supplier.get());
+		}
 	}
 
 	List<OdometryDoubleInput> registeredInputs = new ArrayList<>();
 	List<BaseStatusSignal> registeredStatusSignals = new ArrayList<>();
 
-	static Queue<Double> registerSignalInput(StatusSignal<Double> signal) {
-		signal.setUpdateFrequency(DriveConstants.TrainConstants.odomHz, .02);
+	static Queue<Double> registerSignalInput(StatusSignal<?> signal) {
+		// Set the update frequency for the signal; assuming all signal values can be
+		// cast to Double.
+		signal.setUpdateFrequency(DriveConstants.TrainConstants.odomHz, 0.02);
 		registeredStatusSignals.add(signal);
-		return registerInput(signal.asSupplier());
+		return registerInput(() -> (Double) signal.getValueAsDouble());
 	}
 
 	static Queue<Double> registerInput(Supplier<Double> supplier) {
-		final OdometryDoubleInput odometryDoubleInput = new OdometryDoubleInput(
-				supplier);
+		final OdometryDoubleInput odometryDoubleInput = new OdometryDoubleInput(supplier);
 		registeredInputs.add(odometryDoubleInput);
 		return odometryDoubleInput.queue;
 	}
 
 	static OdometryThread createInstance() {
 		return switch (Constants.currentMode) {
-		case REAL -> new OdometryThreadReal(
-				registeredInputs.toArray(new OdometryDoubleInput[0]),
-				registeredStatusSignals.toArray(new BaseStatusSignal[0]));
-		case REPLAY -> inputs -> {
-		};
+			case REAL -> new OdometryThreadReal(
+					registeredInputs,
+					registeredStatusSignals);
+			case SIM -> new AbstractDriveTrainSimulation.OdometryTimeStampsSim.OdometryThreadSim();
+			case REPLAY -> inputs -> {
+			};
 		};
 	}
 
@@ -59,9 +64,12 @@ public interface OdometryThread {
 
 	void updateInputs(OdometryThreadInputs inputs);
 
-	default void start() {}
+	default void start() {
+	}
 
-	default void lockOdometry() {}
+	default void lockOdometry() {
+	}
 
-	default void unlockOdometry() {}
+	default void unlockOdometry() {
+	}
 }

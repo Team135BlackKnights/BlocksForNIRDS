@@ -4,7 +4,6 @@
 package frc.robot.subsystems.drive.Mecanum;
 
 import edu.wpi.first.math.geometry.Rotation2d;
-import frc.robot.utils.selfCheck.SelfChecking;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,6 +46,8 @@ public interface MecanumIO {
 	/** Resets the Gyro */
 	public default void reset() {}
 
+	/** Updates sim in SIM MODE */
+	public default void updateSim(double dtSeconds) {}
 
 	/** Update the motor controllers to a specificed max amperage */
 	public default void setCurrentLimit(int amps) {}
@@ -58,11 +59,4 @@ public interface MecanumIO {
 			double frontRightFFVolts, double backLeftFFVolts,
 			double backRightFFVolts) {}
 
-	/**
-	 * Get a list of the SelfChecking interface for all hardware in that
-	 * implementation
-	 */
-	public default List<SelfChecking> getSelfCheckingHardware() {
-		return new ArrayList<SelfChecking>();
-	}
 }

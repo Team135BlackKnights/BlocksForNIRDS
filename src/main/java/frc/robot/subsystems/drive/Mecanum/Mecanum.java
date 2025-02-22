@@ -3,8 +3,6 @@
 // Be sure to understand how it creates the "inputs" variable and edits it!
 package frc.robot.subsystems.drive.Mecanum;
 
-import static edu.wpi.first.units.Units.*;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -14,10 +12,8 @@ import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.pathfinding.Pathfinding;
-import com.pathplanner.lib.util.HolonomicPathFollowerConfig;
-import com.pathplanner.lib.util.PIDConstants;
+import com.pathplanner.lib.util.DriveFeedforwards;
 import com.pathplanner.lib.util.PathPlannerLogging;
-import com.pathplanner.lib.util.ReplanningConfig;
 
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.Nat;
@@ -35,27 +31,31 @@ import edu.wpi.first.math.kinematics.MecanumDriveWheelPositions;
 import edu.wpi.first.math.kinematics.MecanumDriveWheelSpeeds;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
-import edu.wpi.first.units.Measure;
-import edu.wpi.first.units.measure.Time;
-import edu.wpi.first.units.measure.Velocity;
-import edu.wpi.first.units.measure.Voltage;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
-import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import frc.robot.Robot;
-import frc.robot.subsystems.SubsystemChecker;
 import frc.robot.subsystems.drive.DrivetrainS;
 import frc.robot.utils.drive.DriveConstants;
 import frc.robot.utils.drive.LocalADStarAK;
 import frc.robot.utils.drive.Position;
-import frc.robot.utils.selfCheck.SelfChecking;
-
+import frc.robot.utils.drive.DriveConstants.TrainConstants;
 import org.littletonrobotics.junction.AutoLogOutput;
 import org.littletonrobotics.junction.Logger;
 
-public class Mecanum extends SubsystemChecker implements DrivetrainS {
+public class Mecanum implements DrivetrainS {
 	public static final double WHEEL_RADIUS = DriveConstants.TrainConstants.kWheelDiameter
 			/ 2;
+
+	public enum DriveMode {
+		NORMAL, WHEEL_RADIUS_CHARACTERIZATION, SPEED_CHARACTERIZATION
+	}
+
+	private record NextMotorOutput(MecanumDriveWheelSpeeds wheelSpeeds, double[] voltages) {
+	}
+
+	private NextMotorOutput nextMotorOutput = new NextMotorOutput(new MecanumDriveWheelSpeeds(), new double[4]);
+	private DriveMode currentDriveMode = DriveMode.NORMAL;
+	private double characterizationVelocity = 0.0;
 	public static final double TRACK_WIDTH = DriveConstants.kChassisWidth;
 	private final MecanumIO io;
 	private final MecanumIOInputsAutoLogged inputs = new MecanumIOInputsAutoLogged();
@@ -64,9 +64,8 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 			DriveConstants.kModuleTranslations[1],
 			DriveConstants.kModuleTranslations[2],
 			DriveConstants.kModuleTranslations[3]);
-	private final SimpleMotorFeedforward feedforward = DriveConstants.TrainConstants.overallDriveMotorConstantContainer
+	private final SimpleMotorFeedforward feedforward = TrainConstants.overallDriveMotorConstantContainer
 			.getFeedforward();
-	private final SysIdRoutine sysId;
 	private final double poseBufferSizeSeconds = 2;
 	private Twist2d fieldVelocity;
 	private Position<MecanumDriveWheelPositions> wheelPositions;
@@ -77,46 +76,34 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 			.createBuffer(poseBufferSizeSeconds);
 
 	public record VisionObservation(Pose2d visionPose, double timestamp,
-			Matrix<N3, N1> stdDevs) {}
+			Matrix<N3, N1> stdDevs) {
+	}
 
 	public record OdometryObservation(MecanumDriveWheelPositions wheelPositions,
-			Rotation2d gyroAngle, double timestamp) {}
+			Rotation2d gyroAngle, double timestamp) {
+	}
 
 	private final Matrix<N3, N1> qStdDevs = new Matrix<>(Nat.N3(), Nat.N1());
 	private Rotation2d lastGyroAngle = new Rotation2d();
 	private MecanumDriveWheelPositions lastPositions = null;
 	private Pose2d odometryPose = new Pose2d();
 	private Pose2d estimatedPose = new Pose2d();
+
 	/** Creates a new Drive. */
 	public Mecanum(MecanumIO io) {
 		this.io = io;
 		// Configure AutoBuilder for PathPlanner
-		AutoBuilder.configureHolonomic(this::getPose, this::resetPose,
-				this::getChassisSpeeds, this::setChassisSpeeds,
-				new HolonomicPathFollowerConfig(new PIDConstants(
-						DriveConstants.TrainConstants.pathplannerTranslationConstantContainer
-								.getP(),
-						DriveConstants.TrainConstants.pathplannerTranslationConstantContainer
-								.getI(),
-						DriveConstants.TrainConstants.pathplannerTranslationConstantContainer
-								.getD()),
-						new PIDConstants(
-								DriveConstants.TrainConstants.pathplannerRotationConstantContainer
-										.getP(),
-								DriveConstants.TrainConstants.pathplannerRotationConstantContainer
-										.getI(),
-								DriveConstants.TrainConstants.pathplannerRotationConstantContainer
-										.getD()),
-						DriveConstants.kMaxSpeedMetersPerSecond,
-						DriveConstants.kDriveBaseRadius,
-						new ReplanningConfig(true, true)),
+		AutoBuilder.configure(this::getPose, this::resetPose,
+				this::getChassisSpeeds, this::setPathplannerChassisSpeeds,
+				DriveConstants.mainController,
+				DriveConstants.mainConfig,
 				() -> Robot.isRed, this);
 
 		for (int i = 0; i < 3; ++i) {
-					qStdDevs.set(i, 0, Math.pow(
-							DriveConstants.TrainConstants.odometryStateStdDevs.get(i, 0),
-							2));
-				}
+			qStdDevs.set(i, 0, Math.pow(
+					DriveConstants.TrainConstants.odometryStateStdDevs.get(i, 0),
+					2));
+		}
 		Pathfinding.setPathfinder(new LocalADStarAK());
 		PathPlannerLogging.setLogActivePathCallback((activePath) -> {
 			Logger.recordOutput("Odometry/Trajectory",
@@ -125,18 +112,6 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 		PathPlannerLogging.setLogTargetPoseCallback((targetPose) -> {
 			Logger.recordOutput("Odometry/TrajectorySetpoint", targetPose);
 		});
-		// Configure SysId
-		Measure<Velocity<Voltage>> rampRate = Volts.of(1).per(Seconds.of(1)); //for going FROM ZERO PER SECOND
-		Voltage holdVoltage = Volts.of(4);
-		Time timeout = Seconds.of(10);
-		sysId = new SysIdRoutine(
-				new SysIdRoutine.Config(rampRate, holdVoltage, timeout,
-						(state) -> Logger.recordOutput("Mecanum/SysIdState",
-								state.toString())),
-				new SysIdRoutine.Mechanism(
-						(voltage) -> driveVolts(voltage.in(Volts), voltage.in(Volts),
-								voltage.in(Volts), voltage.in(Volts)),
-						null, this));
 		registerSelfCheckHardware();
 	}
 
@@ -151,8 +126,10 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 
 	@Override
 	public void setChassisSpeeds(ChassisSpeeds speeds) {
+		currentDriveMode = DriveMode.NORMAL;
+		pathplannerIndex = 0;
 		MecanumDriveWheelSpeeds wheelSpeeds = kinematics.toWheelSpeeds(speeds);
-		driveVelocity(wheelSpeeds);
+		driveVelocity(wheelSpeeds, false);
 	}
 
 	private MecanumDriveWheelPositions getWheelPositions() {
@@ -160,7 +137,13 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 				getFrontRightPositionMeters(), getBackLeftPositionMeters(),
 				getBackRightPositionMeters());
 	}
-/** Add odometry observation */
+
+	/** SIM ONLY */
+	public void updateSim(double dtSeconds) {
+		io.updateSim(dtSeconds);
+	}
+
+	/** Add odometry observation */
 	public void addOdometryObservation(OdometryObservation observation) {
 		if (lastPositions == null) {
 			lastPositions = new MecanumDriveWheelPositions();
@@ -168,7 +151,7 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 		}
 		Twist2d twist = kinematics.toTwist2d(lastPositions,
 				observation.wheelPositions());
-				lastPositions = observation.wheelPositions();
+		lastPositions = observation.wheelPositions();
 		// Check gyro connected
 		if (observation.gyroAngle != null) {
 			// Update dtheta for twist if gyro connected
@@ -191,8 +174,7 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 					- poseBufferSizeSeconds > observation.timestamp()) {
 				return;
 			}
-		}
-		catch (NoSuchElementException ex) {
+		} catch (NoSuchElementException ex) {
 			return;
 		}
 		// Get odometry based pose at timestamp
@@ -240,10 +222,14 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 		estimatedPose = estimateAtTime.plus(scaledTransform)
 				.plus(sampleToOdometryTransform);
 	}
+
 	@Override
 	public void periodic() {
+		long timestamp = System.currentTimeMillis();
 		io.updateInputs(inputs);
 		Logger.processInputs("Mecanum", inputs);
+		Logger.recordOutput("SystemStatus/Periodic/DriveInputsMS", System.currentTimeMillis() - timestamp);
+		timestamp = System.currentTimeMillis();
 		// Update odometry
 		wheelPositions = getPositionsWithTimestamp(getWheelPositions());
 		if (debounce == 1 && isConnected()) {
@@ -267,7 +253,26 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 		addOdometryObservation(new OdometryObservation(wheelPositions.getPositions(),
 				rawGyroRotation, wheelPositions.getTimestamp()));
 		collisionDetected = collisionDetected();
+		switch (currentDriveMode) {
+			case WHEEL_RADIUS_CHARACTERIZATION:
+				ChassisSpeeds speeds = new ChassisSpeeds(0, 0, characterizationVelocity);
+				driveVelocity(kinematics.toWheelSpeeds(speeds), true);
+				break;
+			case SPEED_CHARACTERIZATION:
+				driveVolts(characterizationVelocity, characterizationVelocity,
+						characterizationVelocity, characterizationVelocity);
+				break;
+			case NORMAL:
+				io.setVelocity(nextMotorOutput.wheelSpeeds.frontLeftMetersPerSecond,
+						nextMotorOutput.wheelSpeeds.frontRightMetersPerSecond,
+						nextMotorOutput.wheelSpeeds.rearLeftMetersPerSecond,
+						nextMotorOutput.wheelSpeeds.rearRightMetersPerSecond,
+						nextMotorOutput.voltages[0], nextMotorOutput.voltages[1],
+						nextMotorOutput.voltages[2], nextMotorOutput.voltages[3]);
+				break;
+		}
 		DrivetrainS.super.periodic();
+		Logger.recordOutput("SystemStatus/Periodic/DriveProcessMS", System.currentTimeMillis() - timestamp);
 	}
 
 	/** Run open loop at the specified voltage. */
@@ -277,8 +282,65 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 				backRightVolts);
 	}
 
+	int pathplannerIndex = 0;
+	boolean movingRight = false;
+
+	@Override
+	/**
+	 * Run closed loop given speeds + feedforwards, sends feedforward volt to motor
+	 */
+	public void setPathplannerChassisSpeeds(ChassisSpeeds speeds, DriveFeedforwards feedforwards) {
+		currentDriveMode = DriveMode.NORMAL;
+		MecanumDriveWheelSpeeds wheelSpeeds = kinematics.toWheelSpeeds(speeds);
+		// make the wheel speeds into a list, FL FR BL BR
+		double[] wheelRadSpeedsArray = { wheelSpeeds.frontLeftMetersPerSecond / WHEEL_RADIUS,
+				wheelSpeeds.frontRightMetersPerSecond / WHEEL_RADIUS,
+				wheelSpeeds.rearLeftMetersPerSecond / WHEEL_RADIUS,
+				wheelSpeeds.rearRightMetersPerSecond / WHEEL_RADIUS };
+		// for loop, getting each motor NM, then converting to volts
+		double[] feedForwardVolts = new double[4];
+		pathplannerIndex++;
+		for (int i = 0; i < 4; i++) {
+			// only the robot relative x and y forces are provided for Choreo.
+			double xForce = feedforwards.robotRelativeForcesXNewtons()[i];
+			double yForce = feedforwards.robotRelativeForcesYNewtons()[i];
+			if (pathplannerIndex == 1) {
+				double angle = Math.atan2(yForce, xForce);
+				if (angle > -Math.PI / 2 && angle < Math.PI / 2) {
+					movingRight = true;
+				} else {
+					movingRight = false;
+				}
+			}
+			double linearForce = Math.sqrt(xForce * xForce + yForce * yForce);
+			double velocityMagnitude = Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
+
+			// Calculate the dot product to determine if force aligns with velocity
+			double dotProduct = (xForce * speeds.vxMetersPerSecond + yForce * speeds.vyMetersPerSecond);
+
+			// Sign adjustment based on alignment with velocity direction
+			double signAdjustment = Math.signum(dotProduct / (linearForce * velocityMagnitude));
+			if (Double.isNaN(signAdjustment)) {
+				signAdjustment = 1;
+			}
+			// Assign the adjusted force magnitude
+			double nmVal = linearForce * signAdjustment * (movingRight ? 1 : -1)
+					* DriveConstants.TrainConstants.kWheelDiameter.get() / 2;
+			double speedVoltage = wheelRadSpeedsArray[i] / DriveConstants.getDriveTrainMotors(1).KvRadPerSecPerVolt; // Voltage
+																														// from
+																														// speed
+			double resistanceVoltage = nmVal / DriveConstants.getDriveTrainMotors(1).KtNMPerAmp
+					* DriveConstants.getDriveTrainMotors(1).rOhms; // Voltage
+			// Total voltage required considering both speed and resistance
+			feedForwardVolts[i] = resistanceVoltage + speedVoltage;
+		}
+		// send the volts to the motors
+		nextMotorOutput = new NextMotorOutput(wheelSpeeds, feedForwardVolts);
+	}
+
 	/** Run closed loop at the specified voltage. */
-	public void driveVelocity(MecanumDriveWheelSpeeds wheelSpeeds) {
+	public void driveVelocity(MecanumDriveWheelSpeeds wheelSpeeds, boolean setSpeeds) {
+		currentDriveMode = DriveMode.NORMAL;
 		double frontLeftRadPerSec = wheelSpeeds.frontLeftMetersPerSecond
 				/ WHEEL_RADIUS;
 		double frontRightRadPerSec = wheelSpeeds.frontRightMetersPerSecond
@@ -287,35 +349,53 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 				/ WHEEL_RADIUS;
 		double backRightRadPerSec = wheelSpeeds.rearRightMetersPerSecond
 				/ WHEEL_RADIUS;
-		io.setVelocity(frontLeftRadPerSec, frontRightRadPerSec, backLeftRadPerSec,
-				backRightRadPerSec, feedforward.calculate(frontLeftRadPerSec),
-				feedforward.calculate(frontRightRadPerSec),
-				feedforward.calculate(backLeftRadPerSec),
-				feedforward.calculate(backRightRadPerSec));
+		nextMotorOutput = new NextMotorOutput(wheelSpeeds, new double[] {
+				feedforward.calculateWithVelocities(getFrontLeftVelocityMetersPerSec() /WHEEL_RADIUS,
+						frontLeftRadPerSec),
+				feedforward.calculateWithVelocities(getFrontRightVelocityMetersPerSec() / WHEEL_RADIUS,
+						frontRightRadPerSec),
+				feedforward.calculateWithVelocities(getBackLeftVelocityMetersPerSec() /WHEEL_RADIUS,
+						backLeftRadPerSec),
+				feedforward.calculateWithVelocities(getBackRightVelocityMetersPerSec() /WHEEL_RADIUS,
+						backRightRadPerSec)
+		});
+		if (setSpeeds) {
+			io.setVelocity(frontLeftRadPerSec, frontRightRadPerSec, backLeftRadPerSec,
+					backRightRadPerSec, nextMotorOutput.voltages[0], nextMotorOutput.voltages[1],
+					nextMotorOutput.voltages[2], nextMotorOutput.voltages[3]);
+		}
 	}
 
 	/** Stops the drive. */
 	@Override
-	public void stopModules() { driveVelocity(new MecanumDriveWheelSpeeds()); }
-
-	/**
-	 * Returns a command to run a quasistatic test in the specified direction.
-	 */
-	@Override
-	public Command sysIdQuasistaticDrive(SysIdRoutine.Direction direction) {
-		return sysId.quasistatic(direction);
+	public void stopModules() {
+		currentDriveMode = DriveMode.NORMAL;
+		driveVelocity(new MecanumDriveWheelSpeeds(), true);
 	}
 
-	/** Returns a command to run a dynamic test in the specified direction. */
 	@Override
-	public Command sysIdDynamicDrive(SysIdRoutine.Direction direction) {
-		return sysId.dynamic(direction);
+	public void runWheelRadiusCharacterization(double velocity) {
+		currentDriveMode = DriveMode.WHEEL_RADIUS_CHARACTERIZATION;
+		characterizationVelocity = velocity;
+	}
+
+	@Override
+	public void runCharacterization(double input) {
+		currentDriveMode = DriveMode.SPEED_CHARACTERIZATION;
+		characterizationVelocity = input;
+	}
+
+	@Override
+	public void endCharacterization() {
+		currentDriveMode = DriveMode.NORMAL;
 	}
 
 	/** Returns the current odometry pose in meters. */
 	@AutoLogOutput(key = "RobotState/EstimatedPose")
 	@Override
-	public Pose2d getPose() { return estimatedPose; }
+	public Pose2d getPose() {
+		return estimatedPose;
+	}
 
 	/** Resets the current odometry pose. */
 	@Override
@@ -373,29 +453,25 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 		return inputs.rightBackVelocityRadPerSec * WHEEL_RADIUS;
 	}
 
+	@Override
+	public double[] getWheelRadiusCharacterizationPosition() {
+		return new double[] { inputs.leftFrontPositionRad, inputs.rightFrontPositionRad,
+				inputs.leftBackPositionRad, inputs.rightBackPositionRad };
+	}
+
 	/** Returns the average velocity in radians/second. */
+	@Override
+	@AutoLogOutput(key = "RobotState/Velocity")
 	public double getCharacterizationVelocity() {
-		return (inputs.leftFrontVelocityRadPerSec
-				+ inputs.rightFrontVelocityRadPerSec
-				+ inputs.leftBackVelocityRadPerSec
-				+ inputs.rightBackVelocityRadPerSec) / 4.0;
+		ChassisSpeeds chassisSpeeds = getChassisSpeeds();
+		return Math.sqrt(Math.pow(chassisSpeeds.vxMetersPerSecond, 2) + Math.pow(chassisSpeeds.vyMetersPerSecond, 2) + Math.pow(getChassisSpeeds().omegaRadiansPerSecond * WHEEL_RADIUS, 2));
+	
 	}
 
 	private void registerSelfCheckHardware() {
 		super.registerAllHardware(io.getSelfCheckingHardware());
 	}
 
-	@Override
-	public List<ParentDevice> getOrchestraDevices() {
-		List<ParentDevice> orchestra = new ArrayList<>();
-		List<SelfChecking> driveHardware = io.getSelfCheckingHardware();
-		for (SelfChecking motor : driveHardware) {
-			if (motor.getHardware() instanceof TalonFX) {
-				orchestra.add((TalonFX) motor.getHardware());
-			}
-		}
-		return orchestra;
-	}
 
 	@Override
 	public double getCurrent() {
@@ -405,38 +481,7 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 				+ Math.abs(inputs.rightCurrentAmps[1]);
 	}
 
-	@Override
-	public SystemStatus getTrueSystemStatus() { return getSystemStatus(); }
 
-	@Override
-	public Command getRunnableSystemCheckCommand() {
-		return super.getSystemCheckCommand();
-	}
-
-	@Override
-	public List<ParentDevice> getDriveOrchestraDevices() {
-		return getOrchestraDevices();
-	}
-
-	@Override
-	protected Command systemCheckCommand() {
-		return Commands.sequence(
-				run(() -> setChassisSpeeds(new ChassisSpeeds(0, 0, 0.5)))
-						.withTimeout(2.0),
-				run(() -> setChassisSpeeds(new ChassisSpeeds(0, 0, -0.5)))
-						.withTimeout(2.0),
-				run(() -> setChassisSpeeds(new ChassisSpeeds(1, 0, 0)))
-						.withTimeout(1.0),
-				runOnce(() -> {
-					if (getChassisSpeeds().vxMetersPerSecond > 1.2
-							|| getChassisSpeeds().vxMetersPerSecond < .8) {
-						addFault(
-								"[System Check] Forward speed did not reah target speed in time.",
-								false, true);
-					}
-				})).until(() -> !getFaults().isEmpty()).andThen(
-						runOnce(() -> setChassisSpeeds(new ChassisSpeeds(0, 0, 0))));
-	}
 
 	@Override
 	public void newVisionMeasurement(Pose2d pose, double timestamp,
@@ -445,16 +490,20 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 	}
 
 	@Override
-	public Rotation2d getRotation2d() { return rawGyroRotation; }
+	public Rotation2d getRotation2d() {
+		return rawGyroRotation;
+	}
 
 	@Override
 	public double getYawVelocity() {
-		return fieldVelocity.dtheta; //?
+		return fieldVelocity.dtheta; // ?
 	}
 
 	@AutoLogOutput(key = "RobotState/FieldVelocity")
 	@Override
-	public Twist2d getFieldVelocity() { return fieldVelocity; }
+	public Twist2d getFieldVelocity() {
+		return fieldVelocity;
+	}
 
 	@Override
 	public void zeroHeading() {
@@ -463,12 +512,18 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 	}
 
 	@Override
-	public boolean isConnected() { return inputs.gyroConnected; }
+	public boolean isConnected() {
+		return inputs.gyroConnected;
+	}
 
-	private boolean collisionDetected() { return inputs.collisionDetected; }
+	private boolean collisionDetected() {
+		return inputs.collisionDetected;
+	}
 
 	@Override
-	public boolean isCollisionDetected() { return collisionDetected; }
+	public boolean isCollisionDetected() {
+		return collisionDetected;
+	}
 
 	@Override
 	public HashMap<String, Double> getTemps() {
@@ -481,8 +536,12 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 	}
 
 	@Override
-	public void setDriveCurrentLimit(int amps) { io.setCurrentLimit(amps); }
+	public void setDriveCurrentLimit(int amps) {
+		io.setCurrentLimit(amps);
+	}
 
 	@Override
-	public void setCurrentLimit(int amps) { setDriveCurrentLimit(amps); }
+	public void setCurrentLimit(int amps) {
+		setDriveCurrentLimit(amps);
+	}
 }

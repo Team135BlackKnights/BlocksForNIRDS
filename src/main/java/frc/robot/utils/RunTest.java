@@ -20,9 +20,9 @@ public class RunTest extends Command {
 		switch (Robot.runningTest) {
 		case swerveDrive:
 			if (isQuasiastic) {
-				test = RobotContainer.drivetrainS.sysIdQuasistaticDrive(direction);
+				//test = RobotContainer.drivetrainS.sysIdQuasistaticDrive(direction);
 			} else {
-				test = RobotContainer.drivetrainS.sysIdDynamicDrive(direction);
+				//test = RobotContainer.drivetrainS.sysIdDynamicDrive(direction);
 			}
 			break;
 		default:

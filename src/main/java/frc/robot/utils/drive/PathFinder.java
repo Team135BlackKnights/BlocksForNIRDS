@@ -5,6 +5,7 @@ import org.json.simple.JSONObject;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.path.PathConstraints;
 import com.pathplanner.lib.path.PathPlannerPath;
+import com.pathplanner.lib.util.FileVersionException;
 
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -18,9 +19,11 @@ import java.util.function.Supplier;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
+import java.io.IOException;
 import java.util.ArrayList;
 import org.json.simple.JSONArray;
 import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
 
 public class PathFinder {
 	/**
@@ -95,9 +98,21 @@ public class PathFinder {
 				break;
 			case "path":
 				String pathName = (String) commandData.get("pathName");
-				PathPlannerPath path = PathPlannerPath
-						.fromChoreoTrajectory(pathName);
-				poseList.addAll(path.getPathPoses());
+					PathPlannerPath path;
+					try {
+						path = PathPlannerPath
+								.fromChoreoTrajectory(pathName);
+					} catch (FileVersionException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					} catch (IOException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					} catch (ParseException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+			
 				break;
 			case "named":
 			case "wait":

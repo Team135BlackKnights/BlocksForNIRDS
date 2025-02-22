@@ -1,11 +1,10 @@
 package frc.robot.utils.drive.Sensors;
 
-import java.util.ArrayList;
-import java.util.List;
+
 
 import org.littletonrobotics.junction.AutoLog;
 
-import frc.robot.utils.selfCheck.SelfChecking;
+
 
 public interface ColorSensorIO {
 		@AutoLog
@@ -17,9 +16,7 @@ public interface ColorSensorIO {
 
 	public default void updateInputs(ColorSensorIOInputs inputs) {}
 
-	public default List<SelfChecking> getSelfCheckingHardware() {
-		return new ArrayList<SelfChecking>();
-	}
+
 	
 }
 

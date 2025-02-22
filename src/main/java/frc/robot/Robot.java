@@ -19,7 +19,6 @@ import org.littletonrobotics.junction.wpilog.WPILOGReader;
 import org.littletonrobotics.junction.wpilog.WPILOGWriter;
 import frc.robot.Constants.FRCMatchState;
 import frc.robot.Constants.SysIdRoutines;
-import frc.robot.subsystems.SubsystemChecker;
 import frc.robot.subsystems.drive.FastSwerve.Swerve.ModuleLimits;
 import frc.robot.utils.LoggableTunedNumber;
 import frc.robot.utils.drive.DriveConstants;
@@ -66,26 +65,6 @@ public class Robot extends LoggedRobot {
 		}
 		// Instantiate our RobotContainer.  This will perform all our button bindings, and put our
 		// autonomous chooser on the dashboard
-		Logger.recordMetadata("ProjectName", "The Chef"); // Set a metadata value
-		Logger.recordMetadata("TuningMode",
-				Boolean.toString(Constants.isTuningPID));
-		Logger.recordMetadata("RuntimeType", getRuntimeType().toString());
-		Logger.recordMetadata("ProjectName", BuildConstants.MAVEN_NAME);
-		Logger.recordMetadata("BuildDate", BuildConstants.BUILD_DATE);
-		Logger.recordMetadata("GitSHA", BuildConstants.GIT_SHA);
-		Logger.recordMetadata("GitDate", BuildConstants.GIT_DATE);
-		Logger.recordMetadata("GitBranch", BuildConstants.GIT_BRANCH);
-		switch (BuildConstants.DIRTY) {
-		case 0:
-			Logger.recordMetadata("GitDirty", "All changes committed");
-			break;
-		case 1:
-			Logger.recordMetadata("GitDirty", "Uncomitted changes");
-			break;
-		default:
-			Logger.recordMetadata("GitDirty", "Unknown");
-			break;
-		}
 		switch (Constants.currentMode) {
 		case REAL:
 			// Running on a real robot, log to a USB stick ("/U/logs")
@@ -107,11 +86,6 @@ public class Robot extends LoggedRobot {
 		loggerStarted = true;
 		m_robotContainer = new RobotContainer();
 		SmartDashboard.putString("QUEUED TEST", runningTest.toString()); //Put what Test we're going to run on the test controller.
-		for (Subsystem subsys : RobotContainer.getAllSubsystems()) {
-			if (subsys instanceof SubsystemChecker) {
-				((SubsystemChecker) subsys).allowFaultPolling(false);
-			}
-		}
 		SmartDashboard.putBoolean("ShouldEndLog", false);
 	}
 
@@ -128,9 +102,9 @@ public class Robot extends LoggedRobot {
 		double startTime = Logger.getRealTimestamp();
 		LoggableTunedNumber.ifChanged(hashCode(), () -> {
 			DriveConstants.pathConstraints = new PathConstraints(
-					DriveConstants.pathConstraints.getMaxVelocityMps(),
+					DriveConstants.pathConstraints.maxVelocityMPS(),
 					DriveConstants.maxTranslationalAcceleration.get(),
-					DriveConstants.pathConstraints.getMaxAngularVelocityRps(),
+					DriveConstants.pathConstraints.maxAngularAccelerationRadPerSecSq(),
 					DriveConstants.maxRotationalAcceleration.get());
 			DriveConstants.moduleLimitsFree = new ModuleLimits(
 					DriveConstants.kMaxSpeedMetersPerSecond,
@@ -174,11 +148,6 @@ public class Robot extends LoggedRobot {
 		} else {
 			Constants.currentMatchState = FRCMatchState.DISABLED;
 		}
-		for (Subsystem subsys : RobotContainer.getAllSubsystems()) {
-			if (subsys instanceof SubsystemChecker) {
-				((SubsystemChecker) subsys).allowFaultPolling(false);
-			}
-		}
 	}
 
 	@Override
@@ -197,11 +166,7 @@ public class Robot extends LoggedRobot {
 	@Override
 	public void autonomousInit() {
 		Constants.currentMatchState = FRCMatchState.AUTOINIT;
-		for (Subsystem subsys : RobotContainer.getAllSubsystems()) {
-			if (subsys instanceof SubsystemChecker) {
-				((SubsystemChecker) subsys).allowFaultPolling(false);
-			}
-		}
+	
 		RobotContainer.drivetrainS.zeroHeading();
 		RobotContainer.drivetrainS.zeroHeading(); //ENSURE gyro is reset.
 		m_autonomousCommand = m_robotContainer.getAutonomousCommand();
@@ -220,11 +185,7 @@ public class Robot extends LoggedRobot {
 	@Override
 	public void teleopInit() {
 		Constants.currentMatchState = FRCMatchState.TELEOPINIT;
-		for (Subsystem subsys : RobotContainer.getAllSubsystems()) {
-			if (subsys instanceof SubsystemChecker) {
-				((SubsystemChecker) subsys).allowFaultPolling(false);
-			}
-		}
+
 		RobotContainer.field.getObject("path").setTrajectory(new Trajectory());
 		RobotContainer.field.getObject("target pose")
 				.setPose(new Pose2d(-50, -50, new Rotation2d())); //the void
@@ -273,11 +234,6 @@ public class Robot extends LoggedRobot {
 	@Override
 	public void testInit() {
 		Constants.currentMatchState = FRCMatchState.TESTINIT;
-		for (Subsystem subsys : RobotContainer.getAllSubsystems()) {
-			if (subsys instanceof SubsystemChecker) {
-				((SubsystemChecker) subsys).allowFaultPolling(true);
-			}
-		}
 		// Cancels all running commands at the start of test mode.
 		CommandScheduler.getInstance().cancelAll();
 		//RobotContainer.allSystemsCheck().schedule();

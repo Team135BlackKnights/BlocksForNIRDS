@@ -1,12 +1,10 @@
 package frc.robot.utils.drive.Sensors;
 
-import java.util.ArrayList;
-import java.util.List;
+
 import com.revrobotics.ColorSensorV3;
 
 import edu.wpi.first.wpilibj.I2C.Port;
-import frc.robot.utils.selfCheck.SelfChecking;
-import frc.robot.utils.selfCheck.SelfCheckingREVColorSensor;
+
 
 /**
  * Creates a new color sensor on an MXP Port. This is due to the I2C port
@@ -34,10 +32,4 @@ public class REVColorSensorIO implements ColorSensorIO {
 		inputs.proximityCentimeters = output;
 	}
 
-	@Override
-	public List<SelfChecking> getSelfCheckingHardware() {
-		List<SelfChecking> hardware = new ArrayList<SelfChecking>();
-		hardware.add(new SelfCheckingREVColorSensor("REV_Color_Sensor", REVColorSensor));
-		return hardware;
-	}
 }

@@ -1,6 +1,5 @@
 package frc.robot.subsystems.drive;
 
-
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -13,14 +12,14 @@ import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Subsystem;
-import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
-import frc.robot.subsystems.SubsystemChecker.SystemStatus;
-import frc.robot.utils.drive.DriveConstants;
+import frc.robot.subsystems.drive.FastSwerve.Swerve.ModuleLimits;
 import frc.robot.utils.drive.Position;
 import frc.robot.utils.maths.TimeUtil;
 
 import java.util.List;
 import com.ctre.phoenix6.hardware.ParentDevice;
+import com.pathplanner.lib.util.DriveFeedforwards;
+
 import java.util.HashMap;
 
 public interface DrivetrainS extends Subsystem {
@@ -32,15 +31,16 @@ public interface DrivetrainS extends Subsystem {
 	public static Field2d robotField = new Field2d();
 
 	void setChassisSpeeds(ChassisSpeeds speeds);
-
+	/**
+	 * Swerve Only. Set the angles of the modules
+	 */
+	default Command orientModules(Rotation2d[] facings){
+		throw new UnsupportedOperationException("Unimplemented method 'orientModules'");
+	}
 	/**
 	 * @return the ChassisSpeeds of the drivetrain
 	 */
 	ChassisSpeeds getChassisSpeeds();
-
-	default void changeDeadband(double newDeadband) {
-		DriveConstants.TrainConstants.kDeadband = newDeadband;
-	}
 
 	/**
 	 * Reset the drivetrain's odometry to a particular pose
@@ -55,7 +55,7 @@ public interface DrivetrainS extends Subsystem {
 	 * @param pose       the pose returned by the vision estimate
 	 * @param timestamp  the timestamp of the pose
 	 * @param estStdDevs the estimated std dev (pose's difference from the mean
-	 *                      in x, y, and theta)
+	 *                   in x, y, and theta)
 	 */
 	void newVisionMeasurement(Pose2d pose, double timestamp,
 			Matrix<N3, N1> estStdDevs);
@@ -64,10 +64,14 @@ public interface DrivetrainS extends Subsystem {
 	 * @return the pose of the robot
 	 */
 	Pose2d getPose();
+
 	/**
-	 * @apiNote This method is used to get the kinematics of the robot.
+	 * @apiNote This method is used to get the pose of the robot in the simulation
+	 *          for SWERVE ONLY.
 	 */
-	default SwerveDriveKinematics getKinematics() {return null;}
+	default SwerveDriveKinematics getKinematics() {
+		return null;
+	}
 
 	/**
 	 * Stops the drivetrain
@@ -89,23 +93,6 @@ public interface DrivetrainS extends Subsystem {
 	 * The components of the twist are velocities and NOT changes in position.
 	 */
 	public Twist2d getFieldVelocity();
-
-	/**
-	 * SysID Command for drivetrain characterization
-	 * 
-	 * @param kforward the direction
-	 * @return a command executing the characterization step
-	 */
-	Command sysIdDynamicDrive(Direction kforward);
-
-	/**
-	 * SysID Command for drivetrain characterization
-	 * 
-	 * @param kforward the direction
-	 * @return a command executing the characterization step
-	 */
-	Command sysIdQuasistaticDrive(Direction kreverse);
-
 	/**
 	 * Reset the heading of the drivetrain
 	 */
@@ -128,27 +115,14 @@ public interface DrivetrainS extends Subsystem {
 
 	HashMap<String, Double> getTemps();
 
-	default Command getRunnableSystemCheckCommand() {
-		throw new UnsupportedOperationException(
-				"Unimplemented method 'getRunnableSystemCheckCommand'");
-	}
 
-	default SystemStatus getTrueSystemStatus() {
-		throw new UnsupportedOperationException(
-				"Unimplemented method 'getTrueSystemStatus'");
-	}
-
-	default List<ParentDevice> getDriveOrchestraDevices() {
-		throw new UnsupportedOperationException(
-				"Unimplemented method 'getDriveOrchestraDevices'");
-	}
 
 	/**
 	 * Create a position wrapper which contains the positions, and the
 	 * timestamps.
 	 * 
 	 * @param <T>       The type of position, MechanumWheelPositions or
-	 *                     SwerveModulePositions[] or tank's.
+	 *                  SwerveModulePositions[] or tank's.
 	 * @param positions with both a timestamp and position.
 	 * @return
 	 */
@@ -157,19 +131,32 @@ public interface DrivetrainS extends Subsystem {
 		return new Position<>(positions, timestamp);
 	}
 
-	default double getCurrent() { return 0; }
+	default double getCurrent() {
+		return 0;
+	}
 
-	default void setDiscreteChassisSpeeds(ChassisSpeeds speeds) {}
+	 void runWheelRadiusCharacterization(double velocity);
+	 void runCharacterization(double velocity);
+	 void endCharacterization();
+	double getCharacterizationVelocity();
+	void setPathplannerChassisSpeeds(ChassisSpeeds speeds, DriveFeedforwards feedforwards);
+
+	 double[] getWheelRadiusCharacterizationPosition();
 
 	default boolean[] isSkidding() {
 		return new boolean[] { false, false, false, false
 		};
 	}
-
+	default ModuleLimits getModuleLimits() {
+		return null;
+	}
 	@Override
 	default void periodic() {
 		robotField.setRobotPose(getPose());
-		
+
 		SmartDashboard.putData(robotField);
+	}
+	default void setCurrentLimits(int amps){
+		
 	}
 }

@@ -4,7 +4,7 @@
 package frc.robot;
 
 import frc.robot.commands.drive.DrivetrainC;
-import frc.robot.subsystems.SubsystemChecker;
+
 import frc.robot.subsystems.drive.DrivetrainS;
 import frc.robot.subsystems.drive.FastSwerve.Swerve;
 import frc.robot.subsystems.drive.Mecanum.Mecanum;
@@ -385,15 +385,6 @@ public class RobotContainer {
 		return combinedMap;
 	}
 
-	/**
-	 * Checks EACH system's status (DOES NOT RUN THE TESTS)
-	 * 
-	 * @return true if ALL systems were good.
-	 */
-	public static boolean allSystemsOK() {
-		return drivetrainS
-				.getTrueSystemStatus() == SubsystemChecker.SystemStatus.OK;
-	}
 
 	public static Collection<ParentDevice> getOrchestraDevices() {
 		Collection<ParentDevice> devices = new ArrayList<>();

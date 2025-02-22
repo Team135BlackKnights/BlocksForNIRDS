@@ -12,24 +12,24 @@ import com.ctre.phoenix6.configs.Pigeon2Configuration;
 import com.ctre.phoenix6.hardware.Pigeon2;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.util.Units;
-import frc.robot.utils.selfCheck.drive.SelfCheckingPigeon2;
+import edu.wpi.first.units.measure.Angle;
+import edu.wpi.first.units.measure.AngularVelocity;
+import edu.wpi.first.units.measure.LinearAcceleration;
 import frc.robot.subsystems.drive.FastSwerve.OdometryThread;
 import frc.robot.utils.drive.DriveConstants;
-import frc.robot.utils.selfCheck.SelfChecking;
 
-import java.util.ArrayList;
-import java.util.List;
+
 import java.util.Queue;
 
 /** IO implementation for Pigeon2 */
 public class GyroIOPigeon2 implements GyroIO {
 	private static final int id = 0;
 	private final Pigeon2 pigeon;
-	private final StatusSignal<Double> yaw;
-	private final StatusSignal<Double> accelX;
-	private final StatusSignal<Double> accelY;
+	private final StatusSignal<Angle> yaw;
+	private final StatusSignal<LinearAcceleration> accelX;
+	private final StatusSignal<LinearAcceleration> accelY;
 	private final Queue<Double> yawPositionQueue;
-	private final StatusSignal<Double> yawVelocity;
+	private final StatusSignal<AngularVelocity> yawVelocity;
 	private double last_world_linear_accel_x, last_world_linear_accel_y;
 
 	public GyroIOPigeon2() {
@@ -72,12 +72,5 @@ public class GyroIOPigeon2 implements GyroIO {
 		} else {
 			inputs.collisionDetected = false;
 		}
-	}
-
-	@Override
-	public List<SelfChecking> getSelfCheckingHardware() {
-		List<SelfChecking> hardware = new ArrayList<SelfChecking>();
-		hardware.add(new SelfCheckingPigeon2("IMU", pigeon));
-		return hardware;
 	}
 }

@@ -4,10 +4,7 @@
 package frc.robot.utils.drive.Sensors;
 
 import edu.wpi.first.math.geometry.Rotation2d;
-import frc.robot.utils.selfCheck.SelfChecking;
 
-import java.util.ArrayList;
-import java.util.List;
 
 import org.littletonrobotics.junction.AutoLog;
 
@@ -25,8 +22,4 @@ public interface GyroIO {
 	public default void updateInputs(GyroIOInputs inputs) {}
 
 	public default void reset() {}
-
-	public default List<SelfChecking> getSelfCheckingHardware() {
-		return new ArrayList<SelfChecking>();
-	}
 }

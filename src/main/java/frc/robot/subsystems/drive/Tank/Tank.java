@@ -3,8 +3,6 @@
 // Be sure to understand how it creates the "inputs" variable and edits it!
 package frc.robot.subsystems.drive.Tank;
 
-import static edu.wpi.first.units.Units.*;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -14,9 +12,8 @@ import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.pathfinding.Pathfinding;
+import com.pathplanner.lib.util.DriveFeedforwards;
 import com.pathplanner.lib.util.PathPlannerLogging;
-import com.pathplanner.lib.util.ReplanningConfig;
-
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.Nat;
 import edu.wpi.first.math.VecBuilder;
@@ -33,25 +30,20 @@ import edu.wpi.first.math.kinematics.DifferentialDriveWheelPositions;
 import edu.wpi.first.math.kinematics.DifferentialDriveWheelSpeeds;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
-import edu.wpi.first.units.Measure;
-import edu.wpi.first.units.measure.Time;
-import edu.wpi.first.units.measure.Velocity;
-import edu.wpi.first.units.measure.Voltage;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
-import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import frc.robot.Robot;
-import frc.robot.subsystems.SubsystemChecker;
+
 import frc.robot.subsystems.drive.DrivetrainS;
 import frc.robot.utils.drive.DriveConstants;
 import frc.robot.utils.drive.LocalADStarAK;
 import frc.robot.utils.drive.Position;
-import frc.robot.utils.selfCheck.SelfChecking;
+import frc.robot.utils.drive.DriveConstants.TrainConstants;
 
 import org.littletonrobotics.junction.AutoLogOutput;
 import org.littletonrobotics.junction.Logger;
 
-public class Tank extends SubsystemChecker implements DrivetrainS {
+public class Tank implements DrivetrainS {
 	public static final double WHEEL_RADIUS = DriveConstants.TrainConstants.kWheelDiameter
 			/ 2;
 	public static final double TRACK_WIDTH = DriveConstants.kChassisWidth;
@@ -59,9 +51,17 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 	private final TankIOInputsAutoLogged inputs = new TankIOInputsAutoLogged();
 	private final DifferentialDriveKinematics kinematics = new DifferentialDriveKinematics(
 			TRACK_WIDTH);
-	private final SimpleMotorFeedforward feedforward = DriveConstants.TrainConstants.overallDriveMotorConstantContainer
+	private final SimpleMotorFeedforward feedforward = TrainConstants.overallDriveMotorConstantContainer
 			.getFeedforward();
-	private final SysIdRoutine sysId;
+	private record NextMotorOutput(DifferentialDriveWheelSpeeds wheelSpeeds, double[] voltages) {
+			}
+			public enum DriveMode {
+				NORMAL, WHEEL_RADIUS_CHARACTERIZATION, SPEED_CHARACTERIZATION
+			}
+	private NextMotorOutput nextMotorOutput = new NextMotorOutput(new DifferentialDriveWheelSpeeds(), new double[2]);
+	private double characterizationVelocity = 0.0;
+	private DriveMode currentDriveMode = DriveMode.NORMAL;
+
 	private final double poseBufferSizeSeconds = 2;
 	private Twist2d fieldVelocity;
 	private Rotation2d rawGyroRotation = new Rotation2d();
@@ -72,11 +72,13 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 			.createBuffer(poseBufferSizeSeconds);
 
 	public record VisionObservation(Pose2d visionPose, double timestamp,
-			Matrix<N3, N1> stdDevs) {}
+			Matrix<N3, N1> stdDevs) {
+	}
 
 	public record OdometryObservation(
 			DifferentialDriveWheelPositions wheelPositions, Rotation2d gyroAngle,
-			double timestamp) {}
+			double timestamp) {
+	}
 
 	private final Matrix<N3, N1> qStdDevs = new Matrix<>(Nat.N3(), Nat.N1());
 	private Rotation2d lastGyroAngle = new Rotation2d();
@@ -88,9 +90,9 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 	public Tank(TankIO io) {
 		this.io = io;
 		// Configure AutoBuilder for PathPlanner
-		AutoBuilder.configureRamsete(this::getPose, this::resetPose,
-				this::getChassisSpeeds, this::setChassisSpeeds,
-				new ReplanningConfig(true, true), () -> Robot.isRed, this);
+		AutoBuilder.configure(this::getPose, this::resetPose,
+				this::getChassisSpeeds, this::setPathplannerChassisSpeeds, DriveConstants.mainController,
+				DriveConstants.mainConfig, () -> Robot.isRed, this);
 		Pathfinding.setPathfinder(new LocalADStarAK());
 		PathPlannerLogging.setLogActivePathCallback((activePath) -> {
 			Logger.recordOutput("Odometry/Trajectory",
@@ -104,17 +106,6 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 					DriveConstants.TrainConstants.odometryStateStdDevs.get(i, 0),
 					2));
 		}
-		// Configure SysId
-		Measure<Velocity<Voltage>> rampRate = Volts.of(1).per(Seconds.of(1)); //for going FROM ZERO PER SECOND
-		Voltage holdVoltage = Volts.of(4);
-		Time timeout = Seconds.of(10);
-		sysId = new SysIdRoutine(
-				new SysIdRoutine.Config(rampRate, holdVoltage, timeout,
-						(state) -> Logger.recordOutput("Drive/SysIdState",
-								state.toString())),
-				new SysIdRoutine.Mechanism(
-						(voltage) -> driveVolts(voltage.in(Volts), voltage.in(Volts)),
-						null, this));
 		registerSelfCheckHardware();
 	}
 
@@ -149,8 +140,7 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 					- poseBufferSizeSeconds > observation.timestamp()) {
 				return;
 			}
-		}
-		catch (NoSuchElementException ex) {
+		} catch (NoSuchElementException ex) {
 			return;
 		}
 		// Get odometry based pose at timestamp
@@ -205,12 +195,34 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 				getLeftVelocityMetersPerSec(), getRightVelocityMetersPerSec()));
 	}
 
+	/** SIM ONLY */
+	public void updateSim(double dtSeconds) {
+		io.updateSim(dtSeconds);
+	}
 
 	@Override
 	public void setChassisSpeeds(ChassisSpeeds speeds) {
+		currentDriveMode = DriveMode.NORMAL;
 		DifferentialDriveWheelSpeeds wheelSpeeds = kinematics
 				.toWheelSpeeds(speeds);
-		driveVelocity(wheelSpeeds);
+		driveVelocity(wheelSpeeds,false);
+	}
+
+	@Override
+	public void setPathplannerChassisSpeeds(ChassisSpeeds speeds, DriveFeedforwards feedforwards) {
+		currentDriveMode = DriveMode.NORMAL;
+		DifferentialDriveWheelSpeeds wheelSpeeds = kinematics
+				.toWheelSpeeds(speeds);
+		double leftFeedForwardVolts = ((wheelSpeeds.leftMetersPerSecond / WHEEL_RADIUS)
+						/ DriveConstants.getDriveTrainMotors(1).KvRadPerSecPerVolt);
+
+		double rightFeedForwardVolts = ((wheelSpeeds.leftMetersPerSecond / WHEEL_RADIUS)
+						/ DriveConstants.getDriveTrainMotors(1).KvRadPerSecPerVolt);
+		double leftResistanceVoltage = feedforwards.torqueCurrentsAmps()[0]
+				* DriveConstants.getDriveTrainMotors(1).rOhms;
+		double rightResistanceVoltage = feedforwards.torqueCurrentsAmps()[2]
+				* DriveConstants.getDriveTrainMotors(1).rOhms;
+		nextMotorOutput = new NextMotorOutput(wheelSpeeds, new double[]{leftFeedForwardVolts + leftResistanceVoltage, rightFeedForwardVolts + rightResistanceVoltage});
 	}
 
 	private DifferentialDriveWheelPositions getWheelPositions() {
@@ -220,8 +232,11 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 
 	@Override
 	public void periodic() {
+		long timestamp = System.currentTimeMillis();
 		io.updateInputs(inputs);
 		Logger.processInputs("Drive", inputs);
+		Logger.recordOutput("SystemStatus/Periodic/DriveInputsMS", System.currentTimeMillis() - timestamp);
+		timestamp = System.currentTimeMillis();
 		// Update odometry
 		wheelPositions = getPositionsWithTimestamp(getWheelPositions());
 		if (debounce == 1 && isConnected()) {
@@ -245,7 +260,23 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 				new OdometryObservation(wheelPositions.getPositions(),
 						rawGyroRotation, wheelPositions.getTimestamp()));
 		collisionDetected = collisionDetected();
+		switch (currentDriveMode) {
+			case WHEEL_RADIUS_CHARACTERIZATION:
+				ChassisSpeeds speeds = new ChassisSpeeds(0, 0, characterizationVelocity);
+				driveVelocity(kinematics.toWheelSpeeds(speeds), true);
+				break;
+			case SPEED_CHARACTERIZATION:
+				driveVolts(characterizationVelocity, characterizationVelocity);
+				break;
+			case NORMAL:
+				io.setVelocity(nextMotorOutput.wheelSpeeds.leftMetersPerSecond / WHEEL_RADIUS,
+						nextMotorOutput.wheelSpeeds.rightMetersPerSecond / WHEEL_RADIUS,
+						nextMotorOutput.voltages[0], nextMotorOutput.voltages[1]);
+				break;
+		}
 		DrivetrainS.super.periodic();
+		Logger.recordOutput("SystemStatus/Periodic/DriveProcessMS", System.currentTimeMillis() - timestamp);
+
 	}
 
 	/** Run open loop at the specified voltage. */
@@ -254,38 +285,28 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 	}
 
 	/** Run closed loop at the specified voltage. */
-	public void driveVelocity(DifferentialDriveWheelSpeeds wheelSpeeds) {
+	public void driveVelocity(DifferentialDriveWheelSpeeds wheelSpeeds, boolean setSpeeds) {
 		double leftRadPerSec = wheelSpeeds.leftMetersPerSecond / WHEEL_RADIUS;
-		double rightRadPerSec = wheelSpeeds.rightMetersPerSecond / WHEEL_RADIUS;
-		io.setVelocity(leftRadPerSec, rightRadPerSec,
-				feedforward.calculate(leftRadPerSec),
-				feedforward.calculate(rightRadPerSec));
+		double rightRadsPerSec = wheelSpeeds.rightMetersPerSecond / WHEEL_RADIUS;
+		nextMotorOutput = new NextMotorOutput(wheelSpeeds, new double[]{feedforward.calculateWithVelocities(getLeftVelocityMetersPerSec() / WHEEL_RADIUS, leftRadPerSec),
+			feedforward.calculateWithVelocities(getRightVelocityMetersPerSec() / WHEEL_RADIUS, rightRadsPerSec)});
+		if (setSpeeds)
+			io.setVelocity(leftRadPerSec, rightRadsPerSec,
+					nextMotorOutput.voltages[0], nextMotorOutput.voltages[1]);
 	}
 
 	/** Stops the drive. */
 	@Override
 	public void stopModules() {
-		driveVelocity(new DifferentialDriveWheelSpeeds());
-	}
-
-	/**
-	 * Returns a command to run a quasistatic test in the specified direction.
-	 */
-	@Override
-	public Command sysIdQuasistaticDrive(SysIdRoutine.Direction direction) {
-		return sysId.quasistatic(direction);
-	}
-
-	/** Returns a command to run a dynamic test in the specified direction. */
-	@Override
-	public Command sysIdDynamicDrive(SysIdRoutine.Direction direction) {
-		return sysId.dynamic(direction);
+		driveVelocity(new DifferentialDriveWheelSpeeds(),true);
 	}
 
 	/** Returns the current odometry pose in meters. */
 	@AutoLogOutput(key = "RobotState/EstimatedPose")
 	@Override
-	public Pose2d getPose() { return estimatedPose; }
+	public Pose2d getPose() {
+		return estimatedPose;
+	}
 
 	/** Resets the current odometry pose. */
 	@Override
@@ -320,27 +341,32 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 	}
 
 	/** Returns the average velocity in radians/second. */
+	@Override
+	@AutoLogOutput(key = "RobotState/Velocity")
 	public double getCharacterizationVelocity() {
-		return (inputs.leftVelocityRadPerSec + inputs.rightVelocityRadPerSec)
-				/ 2.0;
+		ChassisSpeeds chassisSpeeds = getChassisSpeeds();
+		return Math.sqrt(Math.pow(chassisSpeeds.vxMetersPerSecond, 2) + Math.pow(chassisSpeeds.vyMetersPerSecond, 2) + Math.pow(getChassisSpeeds().omegaRadiansPerSecond * WHEEL_RADIUS, 2));
 	}
-
-	private void registerSelfCheckHardware() {
-		super.registerAllHardware(io.getSelfCheckingHardware());
+	@Override 
+	public double[] getWheelRadiusCharacterizationPosition(){
+		return new double[] { inputs.leftPositionRad, inputs.rightPositionRad };
 	}
 
 	@Override
-	public List<ParentDevice> getOrchestraDevices() {
-		List<ParentDevice> orchestra = new ArrayList<>();
-		List<SelfChecking> driveHardware = io.getSelfCheckingHardware();
-		for (SelfChecking motor : driveHardware) {
-			if (motor.getHardware() instanceof TalonFX) {
-				orchestra.add((TalonFX) motor.getHardware());
-			}
-		}
-		return orchestra;
+	public void runWheelRadiusCharacterization(double velocity) {
+		currentDriveMode = DriveMode.WHEEL_RADIUS_CHARACTERIZATION;
+		characterizationVelocity = velocity;
 	}
 
+	@Override
+	public void runCharacterization(double input) {
+		currentDriveMode = DriveMode.SPEED_CHARACTERIZATION;
+		characterizationVelocity = input;
+	}
+	@Override
+	public void endCharacterization() {
+		currentDriveMode = DriveMode.NORMAL;
+	}
 	@Override
 	public double getCurrent() {
 		if (inputs.leftCurrentAmps.length == 1) {
@@ -353,38 +379,6 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 				+ Math.abs(inputs.rightCurrentAmps[1]);
 	}
 
-	@Override
-	public SystemStatus getTrueSystemStatus() { return getSystemStatus(); }
-
-	@Override
-	public Command getRunnableSystemCheckCommand() {
-		return super.getSystemCheckCommand();
-	}
-
-	@Override
-	public List<ParentDevice> getDriveOrchestraDevices() {
-		return getOrchestraDevices();
-	}
-
-	@Override
-	protected Command systemCheckCommand() {
-		return Commands.sequence(
-				run(() -> setChassisSpeeds(new ChassisSpeeds(0, 0, 0.5)))
-						.withTimeout(2.0),
-				run(() -> setChassisSpeeds(new ChassisSpeeds(0, 0, -0.5)))
-						.withTimeout(2.0),
-				run(() -> setChassisSpeeds(new ChassisSpeeds(1, 0, 0)))
-						.withTimeout(1.0),
-				runOnce(() -> {
-					if (getChassisSpeeds().vxMetersPerSecond > 1.2
-							|| getChassisSpeeds().vxMetersPerSecond < .8) {
-						addFault(
-								"[System Check] Forward speed did not reah target speed in time.",
-								false, true);
-					}
-				})).until(() -> !getFaults().isEmpty()).andThen(
-						runOnce(() -> setChassisSpeeds(new ChassisSpeeds(0, 0, 0))));
-	}
 
 	@Override
 	public void newVisionMeasurement(Pose2d pose, double timestamp,
@@ -393,15 +387,20 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 	}
 
 	@Override
-	public Rotation2d getRotation2d() { return rawGyroRotation; }
+	public Rotation2d getRotation2d() {
+		return rawGyroRotation;
+	}
 
 	@Override
 	public double getYawVelocity() {
-		return fieldVelocity.dtheta; //?
+		return fieldVelocity.dtheta; // ?
 	}
+
 	@AutoLogOutput(key = "RobotState/FieldVelocity")
 	@Override
-	public Twist2d getFieldVelocity() { return fieldVelocity; }
+	public Twist2d getFieldVelocity() {
+		return fieldVelocity;
+	}
 
 	/**
 	 * UNTESTED!
@@ -413,12 +412,18 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 	}
 
 	@Override
-	public boolean isConnected() { return inputs.gyroConnected; }
+	public boolean isConnected() {
+		return inputs.gyroConnected;
+	}
 
-	private boolean collisionDetected() { return inputs.collisionDetected; }
+	private boolean collisionDetected() {
+		return inputs.collisionDetected;
+	}
 
 	@Override
-	public boolean isCollisionDetected() { return collisionDetected; }
+	public boolean isCollisionDetected() {
+		return collisionDetected;
+	}
 
 	@Override
 	public HashMap<String, Double> getTemps() {
@@ -431,8 +436,12 @@ public class Tank extends SubsystemChecker implements DrivetrainS {
 	}
 
 	@Override
-	public void setDriveCurrentLimit(int amps) { io.setCurrentLimit(amps); }
+	public void setDriveCurrentLimit(int amps) {
+		io.setCurrentLimit(amps);
+	}
 
 	@Override
-	public void setCurrentLimit(int amps) { setDriveCurrentLimit(amps); }
+	public void setCurrentLimit(int amps) {
+		setDriveCurrentLimit(amps);
+	}
 }

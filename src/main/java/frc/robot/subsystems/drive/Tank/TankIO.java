@@ -4,7 +4,6 @@
 package frc.robot.subsystems.drive.Tank;
 
 import edu.wpi.first.math.geometry.Rotation2d;
-import frc.robot.utils.selfCheck.SelfChecking;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -41,15 +40,10 @@ public interface TankIO {
 	public default void setCurrentLimit(int amps){}
 	/** Resets the Gyro */
 	public default void reset() {}
+	/** Sim Only */
+	public default void updateSim(double dtSeconds){}
 	/** Run closed loop at the specified velocity. */
 	public default void setVelocity(double leftRadPerSec, double rightRadPerSec,
 			double leftFFVolts, double rightFFVolts) {}
 
-	/**
-	 * Get a list of the SelfChecking interface for all hardware in that
-	 * implementation
-	 */
-	public default List<SelfChecking> getSelfCheckingHardware() {
-		return new ArrayList<SelfChecking>();
-	}
 }

@@ -23,6 +23,7 @@ public class DriveConstants {
 	public static final MotorVendor robotMotorController = MotorVendor.NEO_SPARK_MAX;
 	public static final DriveTrainType driveType = DriveTrainType.SWERVE;
 	public static final GyroType gyroType = GyroType.NAVX;
+	public static final String canBusName = "";
 	public static DCMotor getDriveTrainMotors(int number){
 		switch (robotMotorController) {
 			case NEO_SPARK_MAX:
@@ -64,7 +65,7 @@ public class DriveConstants {
 	public enum GyroType {
 		NAVX, PIGEON
 	}
-
+	
 	public static final LoggableTunedNumber maxTranslationalAcceleration = new LoggableTunedNumber(
 			"Drive/MaxTranslationalAcceleration", Units.feetToMeters(37.5));
 	public static final LoggableTunedNumber maxRotationalAcceleration = new LoggableTunedNumber(
@@ -129,6 +130,7 @@ public class DriveConstants {
 			DriveConstants.kMaxSpeedMetersPerSecond,
 			maxTranslationalAcceleration.get(), maxRotationalAcceleration.get());
 	public static HashMap<String, Pose2d> kEndingPoses = new HashMap<>() {};
+
 	static {
 		kEndingPoses.put("Spike3To5", new Pose2d(7.097, .716, new Rotation2d()));
 		kEndingPoses.put("5To4", new Pose2d(7.3, 2.413, new Rotation2d()));
@@ -174,7 +176,7 @@ public class DriveConstants {
 				VecBuilder.fill(0.003, 0.003, 0.0002));
 		public static double kDeadband = 0.05;
 		public static final double kWheelDiameter = Units.inchesToMeters(3.873),
-				kDriveMotorGearRatio = 6.75, kTurningMotorGearRatio = 150 / 7,
+				kDriveMotorGearRatioLow = 6.75, kTurningMotorGearRatio = 150 / 7,
 				kT = 1.0 / getDriveTrainMotors(1).KtNMPerAmp,
 				weight = Units.lbsToKilograms(110);
 		public static final MotorConstantContainer pathplannerTranslationConstantContainer = new MotorConstantContainer(
