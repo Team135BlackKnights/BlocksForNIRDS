@@ -36,9 +36,9 @@ import edu.wpi.first.math.kinematics.MecanumDriveWheelSpeeds;
 import edu.wpi.first.math.numbers.N1;
 import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.units.Measure;
-import edu.wpi.first.units.Time;
-import edu.wpi.first.units.Velocity;
-import edu.wpi.first.units.Voltage;
+import edu.wpi.first.units.measure.Time;
+import edu.wpi.first.units.measure.Velocity;
+import edu.wpi.first.units.measure.Voltage;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
@@ -127,8 +127,8 @@ public class Mecanum extends SubsystemChecker implements DrivetrainS {
 		});
 		// Configure SysId
 		Measure<Velocity<Voltage>> rampRate = Volts.of(1).per(Seconds.of(1)); //for going FROM ZERO PER SECOND
-		Measure<Voltage> holdVoltage = Volts.of(4);
-		Measure<Time> timeout = Seconds.of(10);
+		Voltage holdVoltage = Volts.of(4);
+		Time timeout = Seconds.of(10);
 		sysId = new SysIdRoutine(
 				new SysIdRoutine.Config(rampRate, holdVoltage, timeout,
 						(state) -> Logger.recordOutput("Mecanum/SysIdState",
